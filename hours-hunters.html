@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Hours Hunters Online</title>
+<style>
+  body { font-family: Arial; text-align:center; background:#f0f0f0; }
+  #lobby, #game { margin-top:30px; }
+  #game { display:none; }
+  input, button { font-size:16px; padding:5px; margin:5px; }
+  img { max-width:80%; height:auto; border:2px solid #333; margin-top:15px; }
+  #status { margin-top:15px; font-weight:bold; }
+</style>
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { getDatabase, ref, set, get, onValue, update } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+  // --- Firebase config ---
+  const firebaseConfig = {
+    apiKey: "AIzaSyCkCT_fqoRtxTs2lhMTd6zFoffbNA5OLQQ",
+    authDomain: "nuevo-hours-hunters.firebaseapp.com",
+    databaseURL: "https://nuevo-hours-hunters-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "nuevo-hours-hunters",
+    storageBucket: "nuevo-hours-hunters.appspot.com",
+    messagingSenderId: "763046809201",
+    appId: "1:763046809201:web:6cf056c0f45b5bca0955d0"
+  };
+  const app = initializeApp(firebaseConfig);
+  const db = getDatabase(app);
+
+  // --- Estado ---
+  let gameCode = "";
+  let playerName = "";
+  let playerLives = 3;
+  let opponentLives = 3;
+  let roundTime = 90;
+  let countdown;
+  let currentImage = "https://i.imgur.com/GT7XZSu.png"; // imagen de ejemplo
+  let currentHour = "16:04"; // hora real de ejemplo
+  let playerReady = false;
+
+  // --- Funciones Lobby ---
+  function generateCode() {
+    playerName = document.getElementById('nameInput').value.trim();
+    if(!playerName){ alert("Pon tu nombre"); return; }
+    gameCode = Math.random().toString(36).substring(2,8).toUpperCase();
+    set(ref(db, `games/${gameCode}`), {
+      host: playerName,
+      players: {
+        [playerName]: { lives: 3 }
+      },
+      started: false
+    });
+    document.getElementById('generatedCode').value = gameCode;
+    document.getElementById('copyBtn').style.display="inline";
+    checkStartButton();
+  }
+
+  function copyCode() {
+    navigator.clipboard.writeText(document.getElementById('generatedCode').value);
+  }
+
+  function joinGame() {
+    playerName = document.getElementById('joinName').value.trim();
+    gameCode = document.getElementById('joinCode').value.trim().toUpperCase();
+    if(!playerName || !gameCode){ alert("Rellena nombre y código"); return; }
+
+    get(ref(db, `games/${gameCode}`)).then(snapshot=>{
+      if(snapshot.exists()){
+        update(ref(db, `games/${gameCode}/players/${playerName}`), { lives:3 });
+        checkStartButton();
+        alert("Te uniste a la partida");
+      }else{
+        alert("Código no válido");
+      }
+    });
+  }
+
+  function checkStartButton(){
+    onValue(ref(db, `games/${gameCode}/players`), snapshot=>{
+      const count = Object.keys(snapshot.val()).length;
+      const startBtn = document.getElementById('startBtn');
+      if(count>=2){
+        startBtn.disabled=false;
+      }
+    });
+  }
+
+  function startGame(){
+    update(ref(db, `games/${gameCode}`), { started:true });
+    document.getElementById('lobby').style.display='none';
+    document.getElementById('game').style.display='block';
+    showRound();
+  }
+
+  // --- Funciones Juego ---
+  function showRound(){
+    document.getElementById('imgRound').src = currentImage;
+    startCountdown();
+  }
+
+  function startCountdown(){
+    let timer = roundTime;
+    document.getElementById('status').textContent = "";
+    countdown = setInterval(()=>{
+      document.getElementById('timer').textContent = "Time left: " + timer + "s";
+      if(timer===0){
+        clearInterval(countdown);
+        submitAnswer();
+      }
+      timer--;
+    },1000);
+  }
+
+  function submitAnswer(){
+    clearInterval(countdown);
+    const guess = document.getElementById('hourInput').value;
+    if(!guess){ alert("Pon una hora!"); return; }
+
+    set(ref(db, `games/${gameCode}/players/${playerName}/lastGuess`), guess);
+    playerReady = true;
+
+    // Esperar al otro jugador
+    onValue(ref(db, `games/${gameCode}/players`), snapshot=>{
+      const players = snapshot.val();
+      const allReady = Object.values(players).every(p=>p.lastGuess);
+      if(allReady){
+        calculateRound(players);
+      }
+    });
+  }
+
+  function calculateRound(players){
+    const guesses = Object.entries(players);
+    const hours = guesses.map(([name, data])=>data.lastGuess);
+    const diff = Math.abs(parseInt(hours[0].split(":")[0]) - parseInt(currentHour.split(":")[0]));
+    let message = "";
+    if(diff>=5){
+      message="Ronda nula, nadie pierde vida!";
+    }else{
+      // Comparar cuál está más cerca
+      const realH = parseInt(currentHour.split(":")[0]);
+      const diffs = hours.map(h=>Math.abs(parseInt(h.split(":")[0])-realH));
+      const loserIndex = diffs[0]>diffs[1]?0:1;
+      const loserName = guesses[loserIndex][0];
+      players[loserName].lives--;
+      message=`${loserName} pierde 1 vida`;
+    }
+    // Actualizar vidas en Firebase
+    Object.entries(players).forEach(([name,data])=>{
+      update(ref(db, `games/${gameCode}/players/${name}`), { lives:data.lives, lastGuess:null });
+    });
+
+    document.getElementById('status').textContent = message + ` | Vidas: ${guesses.map(g=>g[0]+": "+g[1].lives).join(" - ")}`;
+    setTimeout(showRound, 5000); // siguiente ronda en 5s
+  }
+</script>
+</head>
+<body>
+  <h1>Hours Hunters Online</h1>
+
+  <!-- LOBBY -->
+  <div id="lobby">
+    <input id="nameInput" placeholder="Tu nombre">
+    <button onclick="generateCode()">Generar Código</button>
+    <input id="generatedCode" readonly>
+    <button id="copyBtn" onclick="copyCode()" style="display:none">Copiar</button><br><br>
+
+    <input id="joinName" placeholder="Tu nombre">
+    <input id="joinCode" placeholder="Código de partida">
+    <button onclick="joinGame()">Unirse a partida</button><br><br>
+
+    <button id="startBtn" onclick="startGame()" disabled>Comenzar partida</button>
+  </div>
+
+  <!-- GAME -->
+  <div id="game">
+    <img id="imgRound" src=""><br>
+    <input type="time" id="hourInput"><br>
+    <button onclick="submitAnswer()">Enviar Hora</button><br>
+    <div id="timer"></div>
+    <div id="status"></div>
+  </div>
+</body>
+</html>
