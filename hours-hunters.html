@@ -15,8 +15,12 @@
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import { getDatabase, ref, set, get, onValue, update } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
-  // --- Firebase config ---
-  const firebaseConfig = {
+// --- Firebase SDK ---
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getDatabase, ref, set, get, onValue, update } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+// --- Configuración de tu proyecto Firebase ---
+const firebaseConfig = {
   apiKey: "AIzaSyCkCT_fqoRtxTs2lhMTd6zFoffbNA5OLQQ",
   authDomain: "nuevo-hours-hunters.firebaseapp.com",
   databaseURL: "https://nuevo-hours-hunters-default-rtdb.europe-west1.firebasedatabase.app",
@@ -26,19 +30,52 @@
   appId: "1:763046809201:web:6cf056c0f45b5bca0955d0"
 };
 
-  const app = initializeApp(firebaseConfig);
-  const db = getDatabase(app);
+// Inicializar Firebase
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
 
-  // --- Estado ---
-  let gameCode = "";
-  let playerName = "";
-  let playerLives = 3;
-  let opponentLives = 3;
-  let roundTime = 90;
-  let countdown;
-  let currentImage = "https://i.imgur.com/GT7XZSu.png"; // imagen de ejemplo
-  let currentHour = "16:04"; // hora real de ejemplo
-  let playerReady = false;
+// --- Test conexión Firebase ---
+get(ref(db, "/")).then(snapshot=>{
+  console.log("Conexión Firebase OK", snapshot.val());
+}).catch(err=>{
+  console.error("Error conectando Firebase:", err);
+});
+
+// --- Funciones básicas del lobby y partida ---
+async function createGame(playerName) {
+  const gameCode = Math.random().toString(36).substring(2,8).toUpperCase();
+  await set(ref(db, `games/${gameCode}`), {
+    host: playerName,
+    started: false,
+    players: {
+      [playerName]: { lives: 3, lastGuess: null }
+    }
+  });
+  return gameCode;
+}
+
+async function joinGame(playerName, gameCode) {
+  const snap = await get(ref(db, `games/${gameCode}`));
+  if(snap.exists()){
+    await update(ref(db, `games/${gameCode}/players/${playerName}`), { lives: 3, lastGuess: null });
+    return true;
+  } else {
+    return false;
+  }
+}
+
+function onPlayersChange(gameCode, callback){
+  onValue(ref(db, `games/${gameCode}/players`), snapshot=>{
+    if(snapshot.exists()){
+      callback(snapshot.val());
+    }
+  });
+}
+
+async function startGame(gameCode){
+  await update(ref(db, `games/${gameCode}`), { started:true });
+}
+
 
   // --- Funciones Lobby ---
   function generateCode() {
@@ -184,4 +221,5 @@
   </div>
 </body>
 </html>
+
 
